@@ -13,33 +13,45 @@ def generate_round_constants(len_needed):
             result = (result * 2) ^ 0x11b
         results += bytearray([result,0,0,0])
     return results
+
+
 def xor(a,b):
     result = []
     for i in range(min(len(a),len(b))):
         result.append(a[i] ^ b[i])
     print("xor:",result,a,b)
     return result
+
+
 def shift_bytes(inp,shift):
     len_needed = 2 + (shift//len(inp))
     print("shift result:",(inp*len_needed)[shift:][0:4],inp)
     return (inp*len_needed)[shift:][0:4]
+
+
 def sbox(inp):
     results = []
     for byte in inp:
         results.append(SBOX[byte])
     print("sbox:",results,inp)
     return results
+
+
 def generate_reverse_sbox():
     global REVERSE_SBOX
     REVERSE_SBOX = bytearray(256)
     for byte in range(0,0x100):
         REVERSE_SBOX[sbox(bytes([byte]))[0]] = byte
+
+
 def reverse_sbox(inp):
     results = []
     for byte in inp:
         results.append(REVERSE_SBOX[byte])
     print("reverse sbox:",inp,results)
     return results
+
+
 def to_words(inp):
     result = []
     temp = []
@@ -49,6 +61,8 @@ def to_words(inp):
             result.append(temp)
             temp = []
     return result
+
+
 def expand_key(key,size,count):
     if size % 32 != 0 or len(key) != size//8:
         raise ValueError("size must be devideable by 32 and key has to be of the same size")
@@ -56,7 +70,6 @@ def expand_key(key,size,count):
     size = size//32
     consts = to_words(generate_round_constants(count))
     key = to_words(key)
-    print(key)
     for i in range(count*size):
         if i < size:
             result.append(key[i:i+1][0])
@@ -66,8 +79,9 @@ def expand_key(key,size,count):
             result.append(xor(result[i-size],sbox(result[i-1])))
         else:
             result.append(xor(result[i-size],result[i-1]))
-        
     return result
+
+
 def gmul(a,b):
     p = 0
     ao = a
@@ -82,6 +96,8 @@ def gmul(a,b):
         bo >>= 1
     print("GF multiply", p & 255, a, b)
     return p & 255
+
+
 def mix_col(inp):
     result = []
     result.append(gmul(inp[0],2) ^ inp[3] ^ inp[2] ^ gmul(inp[1],3))
@@ -90,39 +106,67 @@ def mix_col(inp):
     result.append(gmul(inp[3],2) ^ inp[2] ^ inp[1] ^ gmul(inp[1],3))
     print("mix col:",result,inp)
     return result
-def mix_cols(inp):
-    results = [[],[],[],[]]
+
+def flip(inp):
     temp = [[],[],[],[]]
-    temp2 = []
     for row in inp:
         for i in range(4):
             temp[i].append(row[i])
+    print("flip:",temp,inp)
+    return temp
+
+def mix_cols(inp):
+    results = []
+    temp = flip(inp)
     for col in temp:
-        temp2.append(mix_col(col))
-    for row in temp2:
-        for i in range(4):
-            results[i].append(row[i])
+        results.append(mix_col(col))
+    results = flip(results)
     return results
+
+
 def shift_rows(inp):
     results = []
-    
-def setup_state(plaintext,key,size,rounds=-1):
+    results.append(shift_bytes(inp[0],0))
+    results.append(shift_bytes(inp[1],1))
+    results.append(shift_bytes(inp[2],2))
+    results.append(shift_bytes(inp[3],3))
+    return results
+
+
+def setup_state(plaintext,key,size,rounds):
     if size != 128:
         raise ValueError("key must be 128 bit")
     if rounds == -1:
         rounds = 11
     roundkeys = expand_key(key,size,rounds)
     words = to_words(plaintext)
-    print(roundkeys)
+    words = flip(words)
     state = words
-    print(state)
-    return state,roundkeys
+    print("setup state:",state,roundkeys,rounds,plaintext,key)
+    return state,roundkeys,rounds
+
+
+def sub_bytes(inp):
+    inp2 = inp.copy()
+    results = STATE_TEMPLATE
+    for i in range(0,4):
+            results[i] = sbox(inp[i])
+    print("sub bytes:",results,inp2)
+    return results
 def add_round_key(state,key):
     result = STATE_TEMPLATE
     for i in range(4):
         for j in range(4):
-            result[i][j] = key[i*4+j] ^ state[i][j]
+            result[i][j] = key[i][j] ^ state[i][j]
     print("add round key:",result,state,key)
     return result
-
-
+def encrypt(plaintext,key,size,rounds=-1):
+    state,roundkeys,rounds = setup_state(plaintext,key,size,rounds)
+    state = add_round_key(state,roundkeys[0:4])
+    roundkeys = roundkeys[4:]
+    for i in range(rounds-1):
+        state = sub_bytes(state)
+        state = shift_rows(state)
+        state = mix_cols(state)
+        state = add_round_key(state,roundkeys[i*4:i*4+4])
+    return state
